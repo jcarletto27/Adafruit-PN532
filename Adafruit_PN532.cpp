@@ -68,8 +68,15 @@ byte pn532response_firmwarevers[] = {
 // Uncomment these lines to enable debug output for PN532(SPI) and/or MIFARE
 // related code
 
-// #define PN532DEBUG
-// #define MIFAREDEBUG
+//#define PN532DEBUG
+//#define MIFAREDEBUG
+
+//fixes bug with ntags
+bool Adafruit_PN532::sendAck() {
+  uint8_t cmd = PN532_SPI_DATAWRITE;
+  spi_dev->write(pn532ack, 6, &cmd, 1);
+  return true;
+}
 
 // If using Native Port on Arduino Zero or Due define as SerialUSB
 #define PN532DEBUGPRINT Serial ///< Fixed name for debug Serial instance
@@ -125,6 +132,7 @@ Adafruit_PN532::Adafruit_PN532(uint8_t ss, SPIClass *theSPI) {
   spi_dev = new Adafruit_SPIDevice(ss, 1000000, SPI_BITORDER_LSBFIRST,
                                    SPI_MODE0, theSPI);
 }
+
 
 /**************************************************************************/
 /*!
@@ -878,7 +886,7 @@ uint8_t Adafruit_PN532::mifareclassic_AuthenticateBlock(uint8_t *uid,
   memcpy(_uid, uid, uidLen);
   _uidLen = uidLen;
 
-#ifdef MIFAREDEBUG
+#ifdef MIFAREDEBUG1
   PN532DEBUGPRINT.print(F("Trying to authenticate card "));
   Adafruit_PN532::PrintHex(_uid, _uidLen);
   PN532DEBUGPRINT.print(F("Using authentication KEY "));
@@ -1151,6 +1159,68 @@ uint8_t Adafruit_PN532::mifareclassic_WriteNDEFURI(uint8_t sectorNumber,
   // Seems that everything was OK (?!)
   return 1;
 }
+
+uint8_t Adafruit_PN532::mifareclassic_WriteNDEFTEXT (uint8_t sectorNumber, const char *data)
+{
+    // Figure out how long the string is
+    uint8_t len = strlen(data);
+
+    // Make sure we're within a 1K limit for the sector number
+    if ((sectorNumber < 1) || (sectorNumber > 15))
+        return 0;
+
+    // Make sure the URI payload is between 1 and 38 chars
+    if ((len < 1) || (len > 38))
+        return 0;
+
+    // Note 0xD3 0xF7 0xD3 0xF7 0xD3 0xF7 must be used for key A
+    // in NDEF records
+
+    // Setup the sector buffer (w/pre-formatted TLV wrapper and NDEF message)
+    uint8_t sectorbuffer1[16] = {0x00, 0x00, 0x03, (uint8_t)(len + 5), 0xD1, 0x01, (uint8_t)(len + 1), 0x54, 0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    uint8_t sectorbuffer2[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    uint8_t sectorbuffer3[16] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+    uint8_t sectorbuffer4[16] = {0xD3, 0xF7, 0xD3, 0xF7, 0xD3, 0xF7, 0x7F, 0x07, 0x88, 0x40, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    if (len <= 6) {
+        // Unlikely we'll get a data this short, but why not ...
+        memcpy (sectorbuffer1 + 9, data, len);
+        sectorbuffer1[len + 9] = 0xFE;
+    } else if (len == 7) {
+        // 0xFE needs to be wrapped around to next block
+        memcpy (sectorbuffer1 + 9, data, len);
+        sectorbuffer2[0] = 0xFE;
+    } else if ((len > 7) && (len <= 22)) {
+        // data fits in two blocks
+        memcpy (sectorbuffer1 + 9, data, 7);
+        memcpy (sectorbuffer2, data + 7, len - 7);
+        sectorbuffer2[len - 7] = 0xFE;
+    } else if (len == 23) {
+        // 0xFE needs to be wrapped around to final block
+        memcpy (sectorbuffer1 + 9, data, 7);
+        memcpy (sectorbuffer2, data + 7, len - 7);
+        sectorbuffer3[0] = 0xFE;
+    } else {
+        // data fits in three blocks
+        memcpy (sectorbuffer1 + 9, data, 7);
+        memcpy (sectorbuffer2, data + 7, 16);
+        memcpy (sectorbuffer3, data + 23, len - 23);
+        sectorbuffer3[len - 23] = 0xFE;
+    }
+
+    // Now write all three blocks back to the card
+    if (!(mifareclassic_WriteDataBlock (sectorNumber * 4, sectorbuffer1)))
+        return 0;
+    if (!(mifareclassic_WriteDataBlock ((sectorNumber * 4) + 1, sectorbuffer2)))
+        return 0;
+    if (!(mifareclassic_WriteDataBlock ((sectorNumber * 4) + 2, sectorbuffer3)))
+        return 0;
+    if (!(mifareclassic_WriteDataBlock ((sectorNumber * 4) + 3, sectorbuffer4)))
+        return 0;
+
+    // Seems that everything was OK (?!)
+    return 1;
+}
+
 
 /***** Mifare Ultralight Functions ******/
 

@@ -143,11 +143,12 @@ public:
   Adafruit_PN532(uint8_t clk, uint8_t miso, uint8_t mosi,
                  uint8_t ss);                          // Software SPI
   Adafruit_PN532(uint8_t ss, SPIClass *theSPI = &SPI); // Hardware SPI
+  Adafruit_PN532(uint8_t ss, SPIClassRP2040 *theSPI = &SPI); // Hardware SPI
   Adafruit_PN532(uint8_t irq, uint8_t reset,
                  TwoWire *theWire = &Wire);              // Hardware I2C
   Adafruit_PN532(uint8_t reset, HardwareSerial *theSer); // Hardware UART
   bool begin(void);
-
+  bool sendAck(void);
   void reset(void);
   void wakeup(void);
 
@@ -184,6 +185,7 @@ public:
   uint8_t mifareclassic_FormatNDEF(void);
   uint8_t mifareclassic_WriteNDEFURI(uint8_t sectorNumber,
                                      uint8_t uriIdentifier, const char *url);
+	uint8_t mifareclassic_WriteNDEFTEXT (uint8_t sectorNumber, const char *data);
 
   // Mifare Ultralight functions
   uint8_t mifareultralight_ReadPage(uint8_t page, uint8_t *buffer);
